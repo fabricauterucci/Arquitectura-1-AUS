@@ -25,7 +25,7 @@ success:	.asciiz "\nLa operación se realizo con éxito\n"
 select_symbol:		.asciiz "> "       # Símbolo para categoría seleccionada
 success_del_msg:	.asciiz "\nCategoría eliminada exitosamente.\n"
 close_msg:		.asciiz "\nEl programa finalizó\n"
-notFound:			.asciiz "\nMensaje de objeto no encontrado.\n"
+notFound:			.asciiz "\nnotFound.\n"
 delete_success_msg: .asciiz "\nObjeto eliminado.\n"
 ask_id_msg:		.asciiz "\nPor favor ingrese el id del objeto a eliminar:\n "
 return:			.asciiz "\n"
@@ -49,8 +49,8 @@ main:
 	sw $t1, 20($t0)
 	la $t1, listobjects
 	sw $t1, 24($t0)
-#	la $t1, delobject
-#	sw $t1, 28($t0)
+	la $t1, deleteObject
+	sw $t1, 28($t0)
 
 main_menu:   li $v0, 4
 	la $a0, menu
@@ -85,7 +85,7 @@ opc6:       jal newobject
         j main_menu
 opc7:       jal listobjects
         j main_menu
-opc8:       #jal deleteObject
+opc8:       jal deleteObject
         j main_menu
    
 close_app:
@@ -373,11 +373,17 @@ listobjects_exit:
 ###	
 
 deleteObject:
+	addiu $sp, $sp, -12
+	sw $ra, 8($sp)
+	sw $s0, 4($sp)
+	sw $s1, 0($sp)
+
 	lw $t0, wclist               # $t0 = categoría seleccionada en curso
 	beqz $t0, error_no_category
 
-	lw $t0, 4($t0)               # $t0 = lista de objetos de la categoría actual
-	beqz $t0, notFound           # Si no hay objetos, no se encuentra el ID
+	addi $s1, $t0, 4             # $s1 = Address of pointer to objects list
+	lw $t1, 0($s1)               # $t1 = First object
+	beqz $t1, not_Found          # Si no hay objetos, no se encuentra el ID
 
     # Preguntar al usuario por el ID
 	la $a0, ask_id_msg           # Cargar mensaje para solicitar el ID
@@ -386,41 +392,40 @@ deleteObject:
 
 	li $v0, 5                    # Syscall para leer entero
 	syscall
-	move $a1, $v0                # Guardar el ID ingresado en $a1
+	move $s0, $v0                # Guardar el ID ingresado en $s0
+	
+	move $t2, $t1                # Iterator = Head
 
-    # Búsqueda y eliminación del objeto
-	li $t1, 0                    # Índice inicial en la lista de objetos
-	li $t2, 0                    # Flag para verificar si se encontró el ID
-    
 deleteObject_loop:
-	lw $t3, 0($t0)               # $t3 = ID del objeto actual
-	beqz $t3, not_Found           # Si llegamos al final de la lista, no se encuentra el ID
+	lw $t3, 4($t2)               # ID at current node
+	beq $t3, $s0, deleteObject_found_match
+    
+	lw $t2, 12($t2)              # Next node
+	beq $t2, $t1, not_Found      # Wrapped around
+	j deleteObject_loop
 
-	beq $t3, $a1, deleteObject_found # Si el ID actual es igual al provisto, eliminar
-	addiu $t0, $t0, 4            # Avanzar al siguiente objeto en la lista
-	j deleteObject_loop          # Repetir el proceso
+deleteObject_found_match:
+	move $a0, $t2                # Node to delete
+	move $a1, $s1                # Address of list pointer
+	jal delnode
 
-deleteObject_found:
-    # Eliminación lógica del objeto:
-	lw $t4, 4($t0)               # $t4 = Dirección del siguiente objeto
-	sw $t4, -4($t0)              # Sobreescribir la dirección actual con la del siguiente
-	li $t2, 1                    # Establecer flag de éxito
-	j deleteObject_exit          # Salir del procedimiento
-
-not_Found:
-	la $a0, notFound         # Cargar mensaje de error "notFound"
-	li $v0, 4                    # Imprimir string
-    	syscall
-	j deleteObject_exit
-
-deleteObject_exit:
-	beqz $t2, main_menu          # Si no se encontró el ID, regresar al menú
-    # Si se eliminó correctamente, mensaje de éxito
 	la $a0, delete_success_msg   # Cargar mensaje de éxito
 	li $v0, 4                    # Imprimir string
 	syscall
-	j main_menu                  # Regresar al menú principal
-			
+	j deleteObject_exit          # Salir del procedimiento
+
+not_Found:
+	la $a0, notFound             # Cargar mensaje de error "notFound"
+	li $v0, 4                    # Imprimir string
+	syscall
+	j deleteObject_exit
+
+deleteObject_exit:
+	lw $s1, 0($sp)
+	lw $s0, 4($sp)
+	lw $ra, 8($sp)
+	addiu $sp, $sp, 12
+	jr $ra
 ###
 
 addnode:
@@ -539,63 +544,52 @@ print_error_and_jump:
 menu_error:
 	li $a0, 101                
 	la $a1, main_menu          
-	jal print_error_and_jump   
+	j print_error_and_jump   
  
 error_one_category_prev:
 	li $a0, 202                
 	la $a1, nextcategory_end  
-	jal print_error_and_jump
+	j print_error_and_jump
 
 error_no_categories_prev:
 	li $a0, 201              
 	la $a1, prevcategory_end 
-	jal print_error_and_jump
+	j print_error_and_jump
 
 error_no_categories_list:
 	li $a0, 301                
 	la $a1, list_end          
-	jal print_error_and_jump
+	j print_error_and_jump
     
 error_401:
 	li $a0, 401                
 	move $a1, $ra          
-	jal print_error_and_jump   
-
-###
+	j print_error_and_jump   
 
 error_501: # No hay categorías creadas
 	li $a0, 501             
-	move $t0, $a0
-        li $v0, 4
-        la $a0, error
-        syscall
-        li $v0, 1
-        la $a0, ($t0)
-	syscall
-	li $v0, 4
-	la $a0, return
-	syscall
-	jr $ra                    
+	move $a1, $ra
+	j print_error_and_jump
 
 error_no_selected_listobj:
 	li $a0, 502            
-	jal print_error         
-	j listobjects_exit     
+	la $a1, listobjects_exit
+	j print_error_and_jump
 
 error_no_categories_listobj:
 	li $a0, 601            
-	jal print_error         
-	j listobjects_exit     
+	la $a1, listobjects_exit     
+	j print_error_and_jump
 
 error_no_objects_listobj:
 	li $a0, 602               
-	jal print_error           
-	j listobjects_exit       
+	la $a1, listobjects_exit       
+	j print_error_and_jump
 	
 error_no_category:
 	li $a0, 701                
-	jal print_error             
-	j deleteObject_exit
+	la $a1, deleteObject_exit
+	j print_error_and_jump
 
 end:
 	lw $ra, 4($sp)              # Restaurar $ra
